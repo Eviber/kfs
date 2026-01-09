@@ -81,14 +81,15 @@ extern "C" fn main() -> ! {
 
 #[panic_handler]
 fn crash_and_burn(info: &core::panic::PanicInfo) -> ! {
-    // Safety:
-    // Nothing matters anymore
-    unsafe {
-        _ = core::fmt::Write::write_fmt(
-            &mut *VGA_BUFFER.lock_unchecked(),
-            core::format_args!("{info}"),
-        );
+    // Safety: At this point we're crashing down anyways.
+    // Might as well try to get some insights.
+    let mut lock = unsafe { VGA_BUFFER.lock_unchecked() };
+    _ = core::fmt::Write::write_fmt(
+        &mut *lock,
+        core::format_args!("{info}\nPress ESC to shutdown"),
+    );
+    while lock.get_kb_data() != Some(0x01) {
+        core::hint::spin_loop();
     }
-    loop {}
     io::qemu_shutdown()
 }
