@@ -16,11 +16,11 @@ static MULTIBOOT2_HEADER: multiboot::Header = multiboot::Header::new();
 const KERNEL_STACK_SIZE: usize = 0x1000 * 32;
 static mut KERNEL_STACK: MaybeUninit<[u8; KERNEL_STACK_SIZE]> = MaybeUninit::uninit();
 
-static VGA_BUFFER: Mutex<io::VgaBuffer> = unsafe { Mutex::new(io::VgaBuffer::new()) };
+static TERMINAL: Mutex<io::Terminal> = unsafe { Mutex::new(io::Terminal::new()) };
 
 macro_rules! printk {
     ($($arg:tt)*) => {
-        _ = core::fmt::Write::write_fmt(&mut *VGA_BUFFER.lock(), core::format_args!($($arg)*))
+        _ = core::fmt::Write::write_fmt(&mut *TERMINAL.lock(), core::format_args!($($arg)*))
     };
 }
 
@@ -43,7 +43,7 @@ extern "C" fn main() -> ! {
 
     // Initialize the VGA buffer.
     {
-        let mut lock = VGA_BUFFER.lock();
+        let mut lock = TERMINAL.lock();
         lock.clear();
         lock.set_cursor_shape(0, 16);
         lock.set_visual_cursor_pos(0, 0);
@@ -61,17 +61,17 @@ extern "C" fn main() -> ! {
                     continue;
                 }
                 let color = ((col / 2 + row + d) & 0xF) as u8;
-                VGA_BUFFER.lock().set_color(color);
-                VGA_BUFFER.lock().write_at(col, row, c);
+                TERMINAL.lock().set_color(color);
+                TERMINAL.lock().write_at(col, row, c);
                 col += 1;
             }
-            let c = VGA_BUFFER.lock().get_char();
+            TERMINAL.lock().get_line();
             if let Some(c) = c {
                 // Escape
                 if c == '\x1B' {
                     break 'a;
                 }
-                VGA_BUFFER.lock().putchar(c);
+                TERMINAL.lock().putchar(c);
             }
         }
         d = d.wrapping_add(1);
@@ -83,7 +83,7 @@ extern "C" fn main() -> ! {
 fn crash_and_burn(info: &core::panic::PanicInfo) -> ! {
     // Safety: At this point we're crashing down anyways.
     // Might as well try to get some insights.
-    let mut lock = unsafe { VGA_BUFFER.lock_unchecked() };
+    let mut lock = unsafe { TERMINAL.lock_unchecked() };
     _ = core::fmt::Write::write_fmt(
         &mut *lock,
         core::format_args!("{info}\nPress ESC to shutdown"),

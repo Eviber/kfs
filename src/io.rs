@@ -10,7 +10,7 @@ const VGA_BUFFER_HEIGHT: usize = 25;
 
 const TAB_SIZE: usize = 4;
 
-pub struct VgaBuffer {
+pub struct Terminal {
     cursor_x: usize,
     cursor_y: usize,
     current_color: u8,
@@ -19,7 +19,7 @@ pub struct VgaBuffer {
     cmdline_len: u8,
 }
 
-impl VgaBuffer {
+impl Terminal {
     /// Creates the VGA buffer interface.
     ///
     /// # Safety
@@ -30,12 +30,12 @@ impl VgaBuffer {
         // SAFETY: The caller must ensure that they have exclusive access to the Text Mode cursor.
         let current_color = 0x0F; // White on black
 
-        VgaBuffer {
+        Terminal {
             cursor_x: 0,
             cursor_y: 0,
             current_color,
             keyboard: keyboard::Qwerty::new(),
-            cmdline: [0; 80],
+            cmdline: [0; _],
             cmdline_len: 0,
         }
     }
@@ -150,6 +150,36 @@ impl VgaBuffer {
             .and_then(|scancode| self.keyboard.advance(scancode))
     }
 
+    /// Refreshes the command line at the current row.
+    pub fn refresh_cmdline(&mut self) {
+        self.cursor_x = 0;
+        let cursor_y = self.cursor_y;
+
+        // Clear the line.
+        let clear_color = (self.current_color as u16) << 8;
+        self.buffer_mut()[cursor_y * VGA_BUFFER_WIDTH..(cursor_y + 1) * VGA_BUFFER_WIDTH]
+            .fill(clear_color);
+
+        // Write the command line.
+        let cmdline =
+            unsafe { str::from_utf8_unchecked(&self.cmdline[..self.cmdline_len as usize]) };
+        for c in cmdline.chars() {
+            if let Some(vga_char) = vga_chars::from_char(c) {
+                unsafe {
+                    (VGA_BUFFER_ADDRESS as *mut u16)
+                        .add(cursor_y * VGA_BUFFER_WIDTH + self.cursor_x)
+                        .write_volatile(vga_char as u16 | (self.current_color as u16) << 8);
+                }
+            }
+
+            self.cursor_x += 1;
+            if self.cursor_x == VGA_BUFFER_WIDTH {
+                break;
+            }
+        }
+        self.set_visual_cursor_pos(self.cursor_x, self.cursor_y);
+    }
+
     /// Returns the next line of input.
     pub fn get_line(&mut self) -> Option<&str> {
         let c = self.get_char()?;
@@ -183,17 +213,26 @@ impl VgaBuffer {
                     }
                 }
 
+                self.refresh_cmdline();
+
                 None
             }
+            c if c.is_control() => None,
             c => {
-                let rem = self.cmdline.len() - self.cmdline_len as usize;
-                todo!();
+                let rem = &mut self.cmdline[self.cmdline_len as usize..];
+                let len = c.len_utf8();
+                if rem.len() >= len {
+                    c.encode_utf8(rem);
+                    self.cmdline_len += len as u8;
+                }
+                self.refresh_cmdline();
+                None
             }
         }
     }
 }
 
-impl core::fmt::Write for VgaBuffer {
+impl core::fmt::Write for Terminal {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for c in s.chars() {
             self.putchar(c);
