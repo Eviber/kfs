@@ -45,8 +45,23 @@ extern "C" fn _start() {
 extern "C" fn main() -> ! {
     init_gdt();
     funny_42();
-    print_stack();
-    io::qemu_shutdown()
+    repl();
+}
+
+fn repl() -> ! {
+    loop {
+        core::hint::spin_loop();
+        let Some(c) = VGA_BUFFER.lock().get_char() else {
+            continue;
+        };
+        printk!("{c}");
+        match c {
+            'r' => io::qemu_reboot(),
+            '\x1b' => io::qemu_shutdown(),
+            'p' => print_stack(),
+            _ => {}
+        }
+    }
 }
 
 fn print_stack() {

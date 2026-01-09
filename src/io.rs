@@ -226,6 +226,13 @@ pub fn qemu_shutdown() -> ! {
     }
 }
 
+pub fn qemu_reboot() -> ! {
+    unsafe {
+        outw(0x64, 0xFE);
+        unreachable_unchecked()
+    }
+}
+
 /// Read a byte from the specified port.
 /// # Safety
 /// This function is unsafe because some accesses to certain ports may have

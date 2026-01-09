@@ -230,6 +230,7 @@ impl Qwerty {
             (Neutral | E0, 0x1C) => Some('\n'),
             (Neutral, 0x0E) => Some('\x08'),
             (Neutral, 0x0F) => Some('\t'),
+            (Neutral, 0x01) => Some('\x1b'),
             _ => None,
         }
     }
