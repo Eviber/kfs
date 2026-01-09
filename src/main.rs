@@ -50,32 +50,45 @@ extern "C" fn main() -> ! {
     }
 
     let mut d = 0;
-    while VGA_BUFFER.lock().get_kb_data() != Some(0x0f) {
-        let mut row = 8;
-        let mut col = 27;
-        for c in ASCII_42.trim_ascii_end().bytes() {
-            if c == b'\n' {
-                row += 1;
-                col = 27;
-                continue;
-            }
-            if !c.is_ascii_whitespace() {
+    'a: loop {
+        for _ in 0..5_000 {
+            let mut row = 0;
+            let mut col = 27;
+            for c in ASCII_42.trim_ascii_end().bytes() {
+                if c == b'\n' {
+                    row += 1;
+                    col = 27;
+                    continue;
+                }
                 let color = ((col / 2 + row + d) & 0xF) as u8;
                 VGA_BUFFER.lock().set_color(color);
                 VGA_BUFFER.lock().write_at(col, row, c);
+                col += 1;
             }
-            col += 1;
+            let scancode = VGA_BUFFER.lock().get_kb_data();
+            if let Some(scancode) = scancode {
+                // Escape
+                if scancode == 0x01 {
+                    break 'a;
+                }
+                printk!("scancode: {}\n", scancode);
+            }
         }
         d = d.wrapping_add(1);
-        printk!("Hello {}!\n", d);
-        for _ in 0..1_000_000 {
-            core::hint::spin_loop()
-        }
     }
     io::qemu_shutdown()
 }
 
 #[panic_handler]
-fn crash_and_burn(_: &core::panic::PanicInfo) -> ! {
+fn crash_and_burn(info: &core::panic::PanicInfo) -> ! {
+    // Safety:
+    // Nothing matters anymore
+    unsafe {
+        _ = core::fmt::Write::write_fmt(
+            &mut *VGA_BUFFER.lock_unchecked(),
+            core::format_args!("{info}"),
+        );
+    }
+    loop {}
     io::qemu_shutdown()
 }

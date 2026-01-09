@@ -31,6 +31,13 @@ impl<T: ?Sized> Mutex<T> {
 
         MutexGuard { mutex: self }
     }
+
+    /// # Safety
+    ///
+    /// Fait gaffe.
+    pub unsafe fn lock_unchecked(&self) -> MutexGuard<'_, T> {
+        MutexGuard { mutex: self }
+    }
 }
 
 pub struct MutexGuard<'a, T: ?Sized> {
