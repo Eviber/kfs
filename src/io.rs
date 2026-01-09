@@ -10,7 +10,6 @@ const VGA_BUFFER_HEIGHT: usize = 25;
 const TAB_SIZE: usize = 4;
 
 pub struct VgaBuffer {
-    buffer: &'static mut [u16],
     cursor_x: usize,
     cursor_y: usize,
     current_color: u8,
@@ -23,36 +22,40 @@ impl VgaBuffer {
     /// This function is unsafe because it allows mutable access to the VGA buffer, and Text Mode cursor,
     /// and keyboard controller ports, which may lead to data races if multiple mutable references exist.
     /// As such, the caller must ensure that they have exclusive access to these resources.
-    pub unsafe fn new() -> Self {
+    pub const unsafe fn new() -> Self {
+        // SAFETY: The caller must ensure that they have exclusive access to the Text Mode cursor.
+        let current_color = 0x0F; // White on black
+
+        VgaBuffer {
+            cursor_x: 0,
+            cursor_y: 0,
+            current_color,
+        }
+    }
+
+    pub fn buffer_mut(&mut self) -> &mut [u16] {
         const VGA_BUFFER: *mut [u16] = core::ptr::slice_from_raw_parts_mut(
             core::ptr::without_provenance_mut(VGA_BUFFER_ADDRESS),
             VGA_BUFFER_WIDTH * VGA_BUFFER_HEIGHT,
         );
 
-        // SAFETY: The caller must ensure that they have exclusive access to the VGA buffer.
-        let buffer = unsafe { &mut *VGA_BUFFER };
-        // SAFETY: The caller must ensure that they have exclusive access to the Text Mode cursor.
-        let (cursor_x, cursor_y) = unsafe { get_cursor_pos() };
-        let current_color = 0x0F; // White on black
-
-        VgaBuffer {
-            buffer,
-            cursor_x,
-            cursor_y,
-            current_color,
-        }
+        // SAFETY: We have an exclusive reference to vga buffer object, which means we own
+        // the memory buffer.
+        unsafe { &mut *VGA_BUFFER }
     }
 
     /// Clears the VGA buffer by filling it with spaces and default colors.
     pub fn clear(&mut self) {
-        self.buffer
-            .fill((self.current_color as u16) << 8 | (b' ' as u16));
+        let color = self.current_color as u16;
+        self.buffer_mut().fill(color << 8 | (b' ' as u16));
     }
 
     /// Writes a byte to the VGA buffer at the specified coordinates with the given color.
     #[inline]
     pub fn write_byte(&mut self, x: usize, y: usize, byte: u8, color: u8) {
-        self.buffer[x + y * VGA_BUFFER_WIDTH] = (color as u16) << 8 | (byte as u16);
+        assert!(x < VGA_BUFFER_WIDTH);
+        assert!(y < VGA_BUFFER_HEIGHT);
+        self.buffer_mut()[x + y * VGA_BUFFER_WIDTH] = (color as u16) << 8 | (byte as u16);
     }
 
     /// Writes a byte to the VGA buffer at the specified coordinates using the current color.
@@ -64,12 +67,12 @@ impl VgaBuffer {
         self.cursor_x = 0;
         self.cursor_y += 1;
         if self.cursor_y == VGA_BUFFER_HEIGHT {
-            self.buffer.copy_within(VGA_BUFFER_WIDTH.., 0);
-            self.buffer[VGA_BUFFER_WIDTH * (VGA_BUFFER_HEIGHT - 1)..]
-                .fill((self.current_color as u16) << 8);
+            self.buffer_mut().copy_within(VGA_BUFFER_WIDTH.., 0);
+            let color = self.current_color as u16;
+            self.buffer_mut()[VGA_BUFFER_WIDTH * (VGA_BUFFER_HEIGHT - 1)..].fill(color << 8);
             self.cursor_y -= 1;
         } else if self.cursor_y > VGA_BUFFER_HEIGHT {
-            panic!("NTM");
+            unreachable!();
         }
     }
 
@@ -94,6 +97,7 @@ impl VgaBuffer {
         if self.cursor_x >= VGA_BUFFER_WIDTH {
             self.newline();
         }
+        self.set_visual_cursor_pos(self.cursor_x, self.cursor_y);
     }
 
     #[inline]
@@ -101,7 +105,7 @@ impl VgaBuffer {
         self.current_color = color;
     }
 
-    pub fn set_cursor_pos(&mut self, x: usize, y: usize) {
+    pub fn set_visual_cursor_pos(&mut self, x: usize, y: usize) {
         let pos = y * 80 + x;
         unsafe {
             outb(0x3D4, 0x0F);
@@ -134,17 +138,31 @@ impl VgaBuffer {
     }
 }
 
-unsafe fn get_cursor_pos() -> (usize, usize) {
-    let mut pos: usize;
-    unsafe {
-        outb(0x3D4, 0x0F);
-        pos = inb(0x3D5) as usize;
-
-        outb(0x3D4, 0x0E);
-        pos |= (inb(0x3D5) as usize) << 8;
+impl core::fmt::Write for VgaBuffer {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for c in s.chars() {
+            self.putchar(c);
+        }
+        Ok(())
     }
-    (pos % VGA_BUFFER_WIDTH, pos / VGA_BUFFER_WIDTH)
+
+    fn write_char(&mut self, c: char) -> core::fmt::Result {
+        self.putchar(c);
+        Ok(())
+    }
 }
+
+// unsafe fn get_cursor_pos() -> (usize, usize) {
+//     let mut pos: usize;
+//     unsafe {
+//         outb(0x3D4, 0x0F);
+//         pos = inb(0x3D5) as usize;
+//
+//         outb(0x3D4, 0x0E);
+//         pos |= (inb(0x3D5) as usize) << 8;
+//     }
+//     (pos % VGA_BUFFER_WIDTH, pos / VGA_BUFFER_WIDTH)
+// }
 
 pub fn qemu_shutdown() -> ! {
     unsafe {
