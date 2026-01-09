@@ -1,6 +1,7 @@
 use core::arch::asm;
 use core::hint::unreachable_unchecked;
 
+mod keyboard;
 mod vga_chars;
 
 const VGA_BUFFER_ADDRESS: usize = 0xb8000;
@@ -13,6 +14,7 @@ pub struct VgaBuffer {
     cursor_x: usize,
     cursor_y: usize,
     current_color: u8,
+    keyboard: keyboard::Qwerty,
 }
 
 impl VgaBuffer {
@@ -30,6 +32,7 @@ impl VgaBuffer {
             cursor_x: 0,
             cursor_y: 0,
             current_color,
+            keyboard: keyboard::Qwerty::new(),
         }
     }
 
@@ -135,6 +138,12 @@ impl VgaBuffer {
         }
         let scancode = unsafe { inb(0x60) };
         Some(scancode)
+    }
+
+    /// Returns the next key press event.
+    pub fn get_char(&mut self) -> Option<char> {
+        self.get_kb_data()
+            .and_then(|scancode| self.keyboard.advance(scancode))
     }
 }
 

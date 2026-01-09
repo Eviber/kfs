@@ -65,13 +65,13 @@ extern "C" fn main() -> ! {
                 VGA_BUFFER.lock().write_at(col, row, c);
                 col += 1;
             }
-            let scancode = VGA_BUFFER.lock().get_kb_data();
-            if let Some(scancode) = scancode {
+            let c = VGA_BUFFER.lock().get_char();
+            if let Some(c) = c {
                 // Escape
-                if scancode == 0x01 {
+                if c == '\x1B' {
                     break 'a;
                 }
-                printk!("scancode: {}\n", scancode);
+                VGA_BUFFER.lock().putchar(c);
             }
         }
         d = d.wrapping_add(1);
