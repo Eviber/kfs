@@ -208,6 +208,8 @@ impl Terminal {
 
     /// Refreshes the command line at the current row.
     pub fn refresh_cmdline(&mut self, s: &str) {
+        const PS1: &str = "kernel@kfs$ ";
+
         self.cursor_x = 0;
         let cursor_y = self.cursor_y;
 
@@ -217,12 +219,8 @@ impl Terminal {
             .fill(clear_color);
 
         // Write the command line.
-        for c in s.chars() {
+        for c in PS1.chars().chain(s.chars()) {
             self.putchar(c);
-        }
-
-        if s.is_empty() {
-            self.set_visual_cursor_pos(self.cursor_x, self.cursor_y);
         }
     }
 

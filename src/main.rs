@@ -48,6 +48,7 @@ extern "C" fn _start() {
 extern "C" fn main() -> ! {
     init_gdt();
     funny_42();
+    TERMINAL.lock().clear();
     repl();
 }
 
@@ -55,38 +56,40 @@ fn repl() -> ! {
     let mut cmdline = Cmdline::new();
 
     loop {
-        core::hint::spin_loop();
-        let Some(line) = TERMINAL.lock().get_line(&mut cmdline) else {
-            continue;
+        let line = 'line: {
+            let mut lock = TERMINAL.lock();
+            cmdline.take();
+            lock.refresh_cmdline("");
+            loop {
+                core::hint::spin_loop();
+                if let Some(line) = lock.get_line(&mut cmdline) {
+                    break 'line line;
+                }
+            }
         };
         printk!("{line}\n");
 
         let mut words = line.split_whitespace();
         match words.next() {
             Some("reboot") => io::qemu_reboot(),
-            Some("shutdown") => io::qemu_shutdown(),
+            Some("poweroff" | "shutdown") => io::qemu_shutdown(),
+            Some("halt") => unsafe { asm!("hlt") },
             Some("stack") => print_stack(),
+            Some("echo") => {
+                for w in words {
+                    printk!("{w} ");
+                }
+                printk!("\n");
+            }
             Some("color") => {
-                let color = match words.next() {
-                    Some(color_str) => {
-                        if color_str.len() != 2 {
-                            printk!("Invalid color\n");
-                            continue;
-                        }
+                let color = words.next().unwrap_or("0f");
 
-                        match u8::from_str_radix(color_str, 16) {
-                            Ok(color) => color,
-                            Err(_) => {
-                                printk!("Invalid color\n");
-                                continue;
-                            }
-                        }
-                    }
-                    None => {
-                        printk!("Missing color argument\n");
-                        continue;
-                    }
+                let Ok(color) = u8::from_str_radix(color.strip_prefix("0x").unwrap_or(color), 16)
+                else {
+                    printk!("Invalid color\n");
+                    continue;
                 };
+
                 TERMINAL.lock().set_color(color);
                 TERMINAL.lock().refresh_cmdline("");
             }
