@@ -13,11 +13,5 @@
     "executables": true,
     "linker-flavor": "ld.lld",
     "linker": "rust-lld",
-    "pre-link-args": {
-        "ld": [
-            "-T",
-            "linker.ld"
-        ]
-    },
     "panic-strategy": "abort"
 }

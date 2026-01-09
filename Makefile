@@ -19,6 +19,7 @@ help:
 	@echo "  make help          print this message"
 	@echo "  make build         build the kernel"
 	@echo "  make run           run the kernel with QEMU"
+	@echo "  make run-grub      build and run the iso with GRUB"
 	@echo "  make print-size    print the size of the kernel"
 	@echo "  make clean         remove intermediate files"
 	@echo "  make re            clean then build the kernel again"
@@ -32,10 +33,19 @@ run:
 	cargo build $(CARGO_FLAGS)
 	qemu-system-i386 -kernel $(TARGET) $(QEMU_FLAGS)
 
+.PHONY: run-grub
+run-grub:
+	cargo build $(CARGO_FLAGS)
+	mkdir -p iso_root/boot/grub
+	cp $(TARGET) iso_root/boot/kfs
+	cp grub.cfg iso_root/boot/grub/grub.cfg
+	grub-mkrescue -o kfs.iso iso_root --modules="multiboot normal biosdisk iso9660"
+	qemu-system-i386 -cdrom kfs.iso $(QEMU_FLAGS)
+
 .PHONY: print-size
 print-size:
-	@cargo build -q $(CARGO_FLAGS)
-	@du -h $(TARGET)
+	cargo build $(CARGO_FLAGS)
+	du -h $(TARGET)
 
 .PHONY: clean
 clean:
