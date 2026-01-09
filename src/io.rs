@@ -10,13 +10,67 @@ const VGA_BUFFER_HEIGHT: usize = 25;
 
 const TAB_SIZE: usize = 4;
 
+pub struct Cmdline {
+    buffer: [u8; 128],
+    len: usize,
+}
+
+impl Cmdline {
+    pub const fn new() -> Self {
+        Cmdline {
+            buffer: [0; 128],
+            len: 0,
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        unsafe { core::str::from_utf8_unchecked(self.buffer.get_unchecked(..self.len)) }
+    }
+
+    pub fn take(&mut self) -> &str {
+        let result =
+            unsafe { core::str::from_utf8_unchecked(self.buffer.get_unchecked(..self.len)) };
+        self.len = 0;
+        result
+    }
+
+    pub fn push(&mut self, c: char) -> bool {
+        let rem = unsafe { self.buffer.get_unchecked_mut(self.len..) };
+        let len = c.len_utf8();
+        if rem.len() < len {
+            return false;
+        }
+        c.encode_utf8(rem);
+        self.len += len;
+        true
+    }
+
+    pub fn pop(&mut self) {
+        match self.as_str().chars().next_back() {
+            Some(c) => self.len -= c.len_utf8(),
+            None => self.len = 0,
+        }
+    }
+
+    pub fn pop_word(&mut self) {
+        match self
+            .as_str()
+            .char_indices()
+            .rev()
+            .skip_while(|(_, x)| x.is_whitespace())
+            .find(|(_, x)| x.is_whitespace())
+        {
+            Some((index, c)) => self.len = index + c.len_utf8(),
+            None => self.len = 0,
+        }
+    }
+}
+
 pub struct Terminal {
     cursor_x: usize,
     cursor_y: usize,
     current_color: u8,
     keyboard: keyboard::Qwerty,
-    cmdline: [u8; 128],
-    cmdline_len: u8,
 }
 
 impl Terminal {
@@ -35,8 +89,6 @@ impl Terminal {
             cursor_y: 0,
             current_color,
             keyboard: keyboard::Qwerty::new(),
-            cmdline: [0; _],
-            cmdline_len: 0,
         }
     }
 
@@ -112,6 +164,10 @@ impl Terminal {
         self.current_color = color;
     }
 
+    pub fn get_color(&self) -> u8 {
+        self.current_color
+    }
+
     pub fn set_visual_cursor_pos(&mut self, x: usize, y: usize) {
         let pos = y * 80 + x;
         unsafe {
@@ -151,7 +207,7 @@ impl Terminal {
     }
 
     /// Refreshes the command line at the current row.
-    pub fn refresh_cmdline(&mut self) {
+    pub fn refresh_cmdline(&mut self, s: &str) {
         self.cursor_x = 0;
         let cursor_y = self.cursor_y;
 
@@ -161,71 +217,40 @@ impl Terminal {
             .fill(clear_color);
 
         // Write the command line.
-        let cmdline =
-            unsafe { str::from_utf8_unchecked(&self.cmdline[..self.cmdline_len as usize]) };
-        for c in cmdline.chars() {
-            if let Some(vga_char) = vga_chars::from_char(c) {
-                unsafe {
-                    (VGA_BUFFER_ADDRESS as *mut u16)
-                        .add(cursor_y * VGA_BUFFER_WIDTH + self.cursor_x)
-                        .write_volatile(vga_char as u16 | (self.current_color as u16) << 8);
-                }
-            }
-
-            self.cursor_x += 1;
-            if self.cursor_x == VGA_BUFFER_WIDTH {
-                break;
-            }
+        for c in s.chars() {
+            self.putchar(c);
         }
-        self.set_visual_cursor_pos(self.cursor_x, self.cursor_y);
+
+        if s.is_empty() {
+            self.set_visual_cursor_pos(self.cursor_x, self.cursor_y);
+        }
     }
 
     /// Returns the next line of input.
-    pub fn get_line(&mut self) -> Option<&str> {
+    pub fn get_line<'a>(&mut self, cmdline: &'a mut Cmdline) -> Option<&'a str> {
         let c = self.get_char()?;
 
         match c {
             '\n' => {
-                let result =
-                    unsafe { str::from_utf8_unchecked(&self.cmdline[..self.cmdline_len as usize]) };
-
-                self.cmdline_len = 0;
-                Some(result)
+                self.refresh_cmdline("");
+                Some(cmdline.take())
             }
             '\x08' => {
-                let s =
-                    unsafe { str::from_utf8_unchecked(&self.cmdline[..self.cmdline_len as usize]) };
-
                 if self.keyboard.modifiers().control() {
-                    match s
-                        .char_indices()
-                        .rev()
-                        .skip_while(|(_, x)| x.is_whitespace())
-                        .find(|(_, x)| x.is_whitespace())
-                    {
-                        Some((index, c)) => self.cmdline_len = (index + c.len_utf8()) as u8,
-                        None => self.cmdline_len = 0,
-                    }
+                    cmdline.pop_word();
                 } else {
-                    match s.chars().next_back() {
-                        Some(c) => self.cmdline_len -= c.len_utf8() as u8,
-                        None => self.cmdline_len = 0,
-                    }
+                    cmdline.pop();
                 }
 
-                self.refresh_cmdline();
+                self.refresh_cmdline(cmdline.as_str());
 
                 None
             }
             c if c.is_control() => None,
             c => {
-                let rem = &mut self.cmdline[self.cmdline_len as usize..];
-                let len = c.len_utf8();
-                if rem.len() >= len {
-                    c.encode_utf8(rem);
-                    self.cmdline_len += len as u8;
+                if cmdline.push(c) {
+                    self.refresh_cmdline(cmdline.as_str());
                 }
-                self.refresh_cmdline();
                 None
             }
         }
@@ -261,6 +286,13 @@ impl core::fmt::Write for Terminal {
 pub fn qemu_shutdown() -> ! {
     unsafe {
         outw(0x604, 0x2000);
+        unreachable_unchecked()
+    }
+}
+
+pub fn qemu_reboot() -> ! {
+    unsafe {
+        outw(0x64, 0xFE);
         unreachable_unchecked()
     }
 }
