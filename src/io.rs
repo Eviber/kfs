@@ -35,7 +35,7 @@ impl VgaBuffer {
             cursor_y: 0,
             current_color,
             keyboard: keyboard::Qwerty::new(),
-            cmdline: [0; 80],
+            cmdline: [0; _],
             cmdline_len: 0,
         }
     }

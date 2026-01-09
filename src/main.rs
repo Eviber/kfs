@@ -2,7 +2,10 @@
 #![no_main]
 #![allow(clippy::needless_range_loop)]
 
-use core::{arch::naked_asm, mem::MaybeUninit};
+use core::{
+    arch::{asm, naked_asm},
+    mem::MaybeUninit,
+};
 use mutex::Mutex;
 
 mod io;
@@ -30,6 +33,7 @@ extern "C" fn _start() {
     naked_asm!(
         "
         lea esp, [{stack_base} + {stack_size}]
+        and esp, 0xfffffff0
         call {main}
         ",
         main = sym main,
@@ -39,6 +43,94 @@ extern "C" fn _start() {
 }
 
 extern "C" fn main() -> ! {
+    init_gdt();
+    funny_42();
+    print_stack();
+    io::qemu_shutdown()
+}
+
+fn print_stack() {
+    let esp: usize;
+    // Safety: nothing is touched, we only get the value of ESP
+    unsafe {
+        asm!("mov {}, esp", out (reg) esp, options(nostack, nomem, preserves_flags));
+    }
+    let mut esp = esp as *const u8;
+    printk!("Stack dump from {:p}:\n", esp);
+    const STACK_END: *const u8 = unsafe { core::ptr::addr_of!(KERNEL_STACK).add(1).cast() };
+    if !esp.addr().is_multiple_of(16) {
+        printk!("{:p}:", esp);
+        if !esp.addr().is_multiple_of(4) {
+            printk!(" ");
+        }
+    }
+    while esp < STACK_END {
+        let byte = unsafe { esp.read_volatile() };
+        if esp.addr().is_multiple_of(16) {
+            printk!("{:p}: ", esp);
+        } else if esp.addr().is_multiple_of(4) {
+            printk!(" ");
+        }
+        printk!("{:02x}", byte);
+        esp = unsafe { esp.add(1) };
+        if esp.addr().is_multiple_of(16) {
+            printk!("\n");
+        }
+    }
+    // printk!("{:p}\n", esp);
+}
+
+fn init_gdt() {
+    // https://docs.rs/x86_64/latest/src/x86_64/structures/gdt.rs.html#543
+    const GDT: [u64; 7] = [
+        0,                  // https://wiki.osdev.org/GDT_Tutorial#Basics
+        0x00cf9b000000ffff, // KERNEL_CODE  - DPL 0 + executable + readable
+        0x00cf93000000ffff, // KERNEL_DATA  - DPL 0 + readable   + writable
+        0x00cf93000000ffff, // KERNEL_STACK - DPL 0 + readable   + writable
+        0x00cffb000000ffff, // USER_CODE    - DPL 3 + executable + readable
+        0x00cff3000000ffff, // USER_DATA    - DPL 3 + readable   + writable
+        0x00cff3000000ffff, // USER_STACK   - DPL 3 + readable   + writable
+    ];
+    #[repr(C, packed)]
+    struct Gdtr {
+        size: u16,
+        address: usize,
+    }
+    const ADDRESS: usize = 0x00000800;
+    unsafe {
+        core::ptr::without_provenance_mut::<[u64; 7]>(ADDRESS).write_volatile(GDT);
+        let gdtr = Gdtr {
+            size: size_of::<[u64; 7]>() as u16 - 1,
+            address: ADDRESS,
+        };
+        const KERNEL_CODE_SELECTOR: u16 = 8;
+        const KERNEL_DATA_SELECTOR: u16 = 8 * 2;
+        const KERNEL_STACK_SELECTOR: u16 = 8 * 3;
+        asm!("lgdt [{gdtr}]", gdtr = in (reg) &gdtr, options(readonly, nostack, preserves_flags));
+        asm!(
+            "mov {tmp:x}, {kernel_data}
+            mov ds, {tmp:x}
+            mov es, {tmp:x}
+            mov fs, {tmp:x}
+            mov gs, {tmp:x}
+            mov {tmp:x}, {kernel_stack}
+            mov ss, {tmp:x}
+            ",
+            tmp = lateout(reg) _,
+            kernel_data = const KERNEL_DATA_SELECTOR,
+            kernel_stack = const KERNEL_STACK_SELECTOR,
+            options(nostack, preserves_flags)
+        );
+        asm!(
+            "jmp ${kernel_code}, $2f;
+            2:",
+            kernel_code = const KERNEL_CODE_SELECTOR,
+            options(att_syntax)
+        );
+    }
+}
+
+fn funny_42() {
     const ASCII_42: &str = include_str!("42.txt");
 
     // Initialize the VGA buffer.
@@ -65,18 +157,12 @@ extern "C" fn main() -> ! {
                 VGA_BUFFER.lock().write_at(col, row, c);
                 col += 1;
             }
-            let c = VGA_BUFFER.lock().get_char();
-            if let Some(c) = c {
-                // Escape
-                if c == '\x1B' {
-                    break 'a;
-                }
-                VGA_BUFFER.lock().putchar(c);
+            if VGA_BUFFER.lock().get_char().is_some() {
+                break 'a;
             }
         }
         d = d.wrapping_add(1);
     }
-    io::qemu_shutdown()
 }
 
 #[panic_handler]
