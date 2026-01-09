@@ -5,7 +5,7 @@ DEBUG_TARGET := $(TARGET_ROOT)/target/debug/$(PACKAGE_NAME)
 RELEASE_TARGET := $(TARGET_ROOT)/target/release/$(PACKAGE_NAME)
 TARGET := $(DEBUG_TARGET)
 
-QEMU_FLAGS := -machine type=pc-i440fx-3.1 -m 100M
+QEMU_FLAGS := -machine type=pc-i440fx-3.1 -m 2G
 CARGO_FLAGS :=
 
 ifeq ($(RELEASE), 1)

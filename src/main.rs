@@ -11,7 +11,7 @@ mod multiboot;
 #[unsafe(link_section = "multiboot")]
 static MULTIBOOT2_HEADER: multiboot::Header = multiboot::Header::new();
 
-const KERNEL_STACK_SIZE: usize = 0x1000 * 16;
+const KERNEL_STACK_SIZE: usize = 0x1000 * 32;
 static mut KERNEL_STACK: MaybeUninit<[u8; KERNEL_STACK_SIZE]> = MaybeUninit::uninit();
 
 #[unsafe(no_mangle)]
@@ -35,13 +35,19 @@ extern "C" fn main() -> ! {
     let mut vga_buffer = unsafe { io::VgaBuffer::new() };
 
     vga_buffer.clear();
-    io::set_cursor_shape(0, 16);
+    vga_buffer.set_cursor_shape(0, 16);
     vga_buffer.set_cursor_pos(0, 0);
+    vga_buffer.putchar('\n');
+    for _ in 0..50 {
+        for c in "Hello, world!\n".chars() {
+            vga_buffer.putchar(c);
+        }
+    }
     let mut d = 0;
-    while io::get_kb_data() != Some(0x0f) {
+    while vga_buffer.get_kb_data() != Some(0x0f) {
         let mut row = 8;
         let mut col = 27;
-        for c in ASCII_42.trim_end().bytes() {
+        for c in ASCII_42.trim_ascii_end().bytes() {
             if c == b'\n' {
                 row += 1;
                 col = 27;
@@ -49,7 +55,8 @@ extern "C" fn main() -> ! {
             }
             if !c.is_ascii_whitespace() {
                 let color = ((col / 2 + row + d) & 0xF) as u8;
-                vga_buffer.write_byte(col, row, c, color);
+                vga_buffer.set_color(color);
+                vga_buffer.write_at(col, row, c);
             }
             col += 1;
         }
@@ -63,5 +70,5 @@ extern "C" fn main() -> ! {
 
 #[panic_handler]
 fn crash_and_burn(_: &core::panic::PanicInfo) -> ! {
-    loop {}
+    io::qemu_shutdown()
 }
