@@ -39,7 +39,7 @@ run-grub:
 	mkdir -p iso_root/boot/grub
 	cp $(TARGET) iso_root/boot/kfs
 	cp grub.cfg iso_root/boot/grub/grub.cfg
-	grub-mkrescue -o kfs.iso iso_root --modules="multiboot normal biosdisk iso9660"
+	grub-mkrescue -o kfs.iso iso_root
 	qemu-system-i386 -cdrom kfs.iso $(QEMU_FLAGS)
 
 .PHONY: print-size
