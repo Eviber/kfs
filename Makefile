@@ -3,14 +3,16 @@ PACKAGE_NAME := $(shell cargo metadata --format-version 1 | jq -r .packages[0].n
 TARGET_ROOT := $(shell cargo metadata --format-version 1 | jq -r .target_directory)
 DEBUG_TARGET := $(TARGET_ROOT)/target/debug/$(PACKAGE_NAME)
 RELEASE_TARGET := $(TARGET_ROOT)/target/release/$(PACKAGE_NAME)
-TARGET := $(DEBUG_TARGET)
+TARGET := 
 
-QEMU_FLAGS := -machine type=pc-i440fx-3.1 -m 2G
+QEMU_FLAGS := -m 2G
 CARGO_FLAGS :=
 
-ifeq ($(RELEASE), 1)
+ifneq ($(DEBUG), 1)
 	TARGET := $(RELEASE_TARGET)
 	CARGO_FLAGS := $(CARGO_FLAGS) --release
+else
+	TARGET := $(DEBUG_TARGET)
 endif
 
 .PHONY: help
