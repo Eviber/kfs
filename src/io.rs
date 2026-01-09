@@ -15,6 +15,8 @@ pub struct VgaBuffer {
     cursor_y: usize,
     current_color: u8,
     keyboard: keyboard::Qwerty,
+    cmdline: [u8; 128],
+    cmdline_len: u8,
 }
 
 impl VgaBuffer {
@@ -33,6 +35,8 @@ impl VgaBuffer {
             cursor_y: 0,
             current_color,
             keyboard: keyboard::Qwerty::new(),
+            cmdline: [0; 80],
+            cmdline_len: 0,
         }
     }
 
@@ -144,6 +148,48 @@ impl VgaBuffer {
     pub fn get_char(&mut self) -> Option<char> {
         self.get_kb_data()
             .and_then(|scancode| self.keyboard.advance(scancode))
+    }
+
+    /// Returns the next line of input.
+    pub fn get_line(&mut self) -> Option<&str> {
+        let c = self.get_char()?;
+
+        match c {
+            '\n' => {
+                let result =
+                    unsafe { str::from_utf8_unchecked(&self.cmdline[..self.cmdline_len as usize]) };
+
+                self.cmdline_len = 0;
+                Some(result)
+            }
+            '\x08' => {
+                let s =
+                    unsafe { str::from_utf8_unchecked(&self.cmdline[..self.cmdline_len as usize]) };
+
+                if self.keyboard.modifiers().control() {
+                    match s
+                        .char_indices()
+                        .rev()
+                        .skip_while(|(_, x)| x.is_whitespace())
+                        .find(|(_, x)| x.is_whitespace())
+                    {
+                        Some((index, c)) => self.cmdline_len = (index + c.len_utf8()) as u8,
+                        None => self.cmdline_len = 0,
+                    }
+                } else {
+                    match s.chars().next_back() {
+                        Some(c) => self.cmdline_len -= c.len_utf8() as u8,
+                        None => self.cmdline_len = 0,
+                    }
+                }
+
+                None
+            }
+            c => {
+                let rem = self.cmdline.len() - self.cmdline_len as usize;
+                todo!();
+            }
+        }
     }
 }
 
